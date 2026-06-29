@@ -1,0 +1,19 @@
+This is a Unity controller for a simple interaction. It uses the Trigger Sensor existing in the project. When the player is detected it plays the interaction.
+The interaction will have several layered feedback each its own Dotween animation. For each Dotween animation expose the curve in the inspector.
+
+Fields:
+- Audio Source
+	- pitch entry duration
+	- pitch entry curve
+
+- Vignette intensity and desaturation (from post processing)
+
+
+Methods:
+-On play
+	- the pitch of the audio source goes from 0 to 1 over some duration (exposed) and with the aforementioned curve.
+
+Scene lighting gradually turn on following the same behavior.
+It's comprised on the following variables:
+	- intensity Multiplier of the Environment Lighting (goes from 0 to 1)
+	- intensity Multiplier of the Reflection (goes from 0 to 1)
