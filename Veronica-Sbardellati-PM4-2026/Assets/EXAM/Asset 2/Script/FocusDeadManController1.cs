@@ -25,6 +25,10 @@ namespace Ludocore
         [Min(0f)]
         [SerializeField] private float pitchEntryDuration = 1f;
 
+        [Tooltip("Seconds to ramp audio pitch back to base on exit")]
+        [Min(0f)]
+        [SerializeField] private float pitchExitDuration = 0.8f;
+
         [Tooltip("Curve used to animate pitch (X = seconds, Y = 0..1)")]
         [SerializeField] private AnimationCurve pitchEntryCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
 
@@ -48,6 +52,10 @@ namespace Ludocore
         [Min(0f)]
         [SerializeField] private float postProcessDuration = 1.5f;
 
+        [Tooltip("Duration (seconds) for vignette & saturation exit (fade out)")]
+        [Min(0f)]
+        [SerializeField] private float postProcessExitDuration = 1f;
+
         //==================== ENVIRONMENT LIGHTING =====================
         [Header("Environment Lighting")]
         [Tooltip("Target multiplier for RenderSettings.ambientIntensity (0..1)")]
@@ -65,6 +73,10 @@ namespace Ludocore
         [Min(0f)]
         [SerializeField] private float lightingDuration = 1.5f;
 
+        [Tooltip("Duration (seconds) for environment lighting exit (fade out)")]
+        [Min(0f)]
+        [SerializeField] private float lightingExitDuration = 1f;
+
         //==================== STATE =====================
         private Vignette _vignette;
         private ColorAdjustments _colorAdjustments;
@@ -75,6 +87,7 @@ namespace Ludocore
         private float _baseReflection;
 
         private Tween _pitchTween;
+        private Tween _volumeTween;
         private Tween _vignetteTween;
         private Tween _saturationTween;
         private Tween _ambientTween;
@@ -115,6 +128,7 @@ namespace Ludocore
         private void OnDestroy()
         {
             _pitchTween?.Kill();
+            _volumeTween?.Kill();
             _vignetteTween?.Kill();
             _saturationTween?.Kill();
             _ambientTween?.Kill();
@@ -128,6 +142,7 @@ namespace Ludocore
             if (audioSource == null && postProcessVolume == null) return;
 
             _pitchTween?.Kill();
+            _volumeTween?.Kill();
             _vignetteTween?.Kill();
             _saturationTween?.Kill();
             _ambientTween?.Kill();
@@ -135,11 +150,22 @@ namespace Ludocore
 
             if (audioSource != null)
             {
+                // start audio pitch/volume from zero-ish entry state
                 audioSource.pitch = 0f;
+                audioSource.volume = 0f;
+                if (!audioSource.isPlaying) audioSource.Play();
+
                 _pitchTween = DOTween.To(
                     () => audioSource.pitch,
                     x => audioSource.pitch = x,
-                    1f,
+                    _baseAudioPitch,
+                    pitchEntryDuration
+                ).SetEase(ConvertCurveToEase(pitchEntryCurve));
+
+                _volumeTween = DOTween.To(
+                    () => audioSource.volume,
+                    x => audioSource.volume = x,
+                    _baseAudioVolume,
                     pitchEntryDuration
                 ).SetEase(ConvertCurveToEase(pitchEntryCurve));
             }
@@ -194,42 +220,87 @@ namespace Ludocore
         }
 
         /// <summary>
-        /// Turn all interaction effects/audio off immediately.
+        /// Fade out all interaction effects/audio back to base values.
         /// Wire this to your sensor's exit/remove event in the inspector if available.
         /// </summary>
         [ContextMenu("Stop")]
         public void Stop()
         {
-            // stop any running animations
+            // kill any running entry tweens
             _pitchTween?.Kill();
+            _volumeTween?.Kill();
             _vignetteTween?.Kill();
             _saturationTween?.Kill();
             _ambientTween?.Kill();
             _reflectionTween?.Kill();
 
-            // audio: stop playback and set volume to zero (user wanted volume off on exit)
+            // Start fade out tweens back to base values
             if (audioSource != null)
             {
-                audioSource.loop = false;
-                if (audioSource.isPlaying) audioSource.Stop();
-                audioSource.volume = 0f;
-                audioSource.pitch = _baseAudioPitch;
+                // Fade pitch back to base and volume back to base, then stop playback.
+                _pitchTween = DOTween.To(
+                    () => audioSource.pitch,
+                    v => audioSource.pitch = v,
+                    _baseAudioPitch,
+                    pitchExitDuration
+                ).SetEase(Ease.Linear);
+
+                _volumeTween = DOTween.To(
+                    () => audioSource.volume,
+                    v => audioSource.volume = v,
+                    _baseAudioVolume,
+                    pitchExitDuration
+                ).SetEase(Ease.Linear)
+                 .OnComplete(() =>
+                 {
+                     audioSource.loop = false;
+                     if (audioSource.isPlaying) audioSource.Stop();
+                 });
             }
 
-            // post processing: reset overrides
             if (_vignette != null)
             {
-                _vignette.intensity.Override(0f);
+                float current = _vignette.intensity.value;
+                _vignetteTween = DOTween.To(
+                    () => current,
+                    v =>
+                    {
+                        current = v;
+                        _vignette.intensity.Override(Mathf.Clamp01(v));
+                    },
+                    0f,
+                    postProcessExitDuration
+                ).SetEase(Ease.Linear);
             }
 
             if (_colorAdjustments != null)
             {
-                _colorAdjustments.saturation.Override(0f);
+                float currentSat = _colorAdjustments.saturation.value;
+                _saturationTween = DOTween.To(
+                    () => currentSat,
+                    v =>
+                    {
+                        currentSat = v;
+                        _colorAdjustments.saturation.Override(v);
+                    },
+                    0f,
+                    postProcessExitDuration
+                ).SetEase(Ease.Linear);
             }
 
-            // restore environment lighting
-            RenderSettings.ambientIntensity = _baseAmbient;
-            RenderSettings.reflectionIntensity = _baseReflection;
+            _ambientTween = DOTween.To(
+                () => RenderSettings.ambientIntensity,
+                v => RenderSettings.ambientIntensity = v,
+                _baseAmbient,
+                lightingExitDuration
+            ).SetEase(Ease.Linear);
+
+            _reflectionTween = DOTween.To(
+                () => RenderSettings.reflectionIntensity,
+                v => RenderSettings.reflectionIntensity = v,
+                _baseReflection,
+                lightingExitDuration
+            ).SetEase(Ease.Linear);
         }
 
         //==================== PRIVATE HELPERS =====================
